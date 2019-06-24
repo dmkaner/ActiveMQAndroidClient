@@ -4,6 +4,7 @@ import android.app.AlertDialog;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -13,6 +14,9 @@ import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationManagerCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.util.Base64;
 import android.view.View;
 import android.widget.Button;
@@ -27,6 +31,7 @@ import org.eclipse.paho.client.mqttv3.IMqttToken;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.Locale;
@@ -37,15 +42,19 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "ActiveMQ";
     public static final String clientId = "any_client_name";
     public static String serverURI = "tcp://192.168.42.179:1883"; //temp ip
-    public static final String publishTopic = "RequestLine";
+    public static final String requestTopic = "RequestLine";
+    public static final String descriptorTopic = "DescriptorLine";
     public static final String subscribeTopic = "ResponseLine";
     public static final String CHANNEL_ID = "ChannelID";
+    public String guid;
     public int counter = 0;
 
     MqttAndroidClient client;
 
     private Button publishBtn;
     private Button listenBtn;
+    private Button confirmCaption;
+    private Button denyCaption;
     private EditText ipEt;
     private TextView incomingText;
     private TextToSpeech t1;
@@ -62,6 +71,8 @@ public class MainActivity extends AppCompatActivity {
     private void initViews() {
         publishBtn = (Button) findViewById(R.id.publish);
         listenBtn = (Button) findViewById(R.id.ipbtn);
+        confirmCaption = (Button) findViewById(R.id.confirmCqption);
+        denyCaption = (Button) findViewById(R.id.denyCaption);
         ipEt = (EditText) findViewById(R.id.ipinput);
         incomingText = (TextView) findViewById(R.id.IncomingText);
         recievedImage = (ImageView) findViewById(R.id.recievedImage);
@@ -77,9 +88,58 @@ public class MainActivity extends AppCompatActivity {
         publishBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                publishMessage("Description Requested");
+                publishRequestMessage("Description Requested");
             }
         });
+
+        confirmCaption.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                publishDescriptionMessage("<correct>");
+                confirmCaption.setEnabled(false);
+                denyCaption.setEnabled(false);
+            }
+        });
+
+        denyCaption.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+
+                final EditText taskEditText = new EditText(MainActivity.this);
+                AlertDialog dialog = new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("Train Dataset")
+                        .setMessage("Describe the image correctly")
+                        .setView(taskEditText)
+                        .setPositiveButton("Confirm", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                publishDescriptionMessage(String.valueOf(taskEditText.getText()));
+                                confirmCaption.setEnabled(false);
+                                denyCaption.setEnabled(false);
+                            }
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .create();
+                dialog.show();
+            }
+        });
+
+        incomingText.addTextChangedListener(new TextWatcher() {
+
+            @Override
+            public void afterTextChanged(Editable s) {}
+
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                confirmCaption.setEnabled(true);
+                denyCaption.setEnabled(true);
+            }
+
+        });
+
 
         t1 = new TextToSpeech(getApplicationContext(), new TextToSpeech.OnInitListener() {
             @Override
@@ -138,10 +198,12 @@ public class MainActivity extends AppCompatActivity {
                         public void run() {
                             String caption;
                             String data;
+
                             try {
                                 JSONObject reader = new JSONObject(message.toString());
                                 caption = reader.getString("Caption");
                                 data = reader.getString("Data");
+                                guid = reader.getString("Guid");
                             } catch (Exception e) {
                                 caption = "Caption Error";
                                 data = null;
@@ -187,11 +249,31 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    private void publishMessage(String message) {
+    private void publishRequestMessage(String message) {
         MqttMessage msg = new MqttMessage();
         msg.setPayload(message.getBytes());
         try {
-            client.publish(publishTopic, msg);
+            client.publish(requestTopic, msg);
+        } catch (MqttException e) {
+            e.printStackTrace();
+
+        }
+    }
+
+    private void publishDescriptionMessage(String message) {
+
+        JSONObject packet = new JSONObject();
+        try {
+            packet.put("Caption", message);
+            packet.put("Guid", guid);
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+
+        MqttMessage msg = new MqttMessage();
+        msg.setPayload(packet.toString().getBytes());
+        try {
+            client.publish(descriptorTopic, msg);
         } catch (MqttException e) {
             e.printStackTrace();
 
